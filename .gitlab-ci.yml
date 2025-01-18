@@ -1,0 +1,81 @@
+stages:
+  - build
+  - deploy
+  - cleanup
+
+variables:
+  FLUTTER_CHANNEL: "stable"
+  ANDROID_KEY_PROPERTIES: |
+    storePassword=$KEYSTORE_PASSWORD
+    keyAlias=$KEY_ALIAS
+    keyPassword=$KEY_PASSWORD
+    storeFile=android/app/my-release-key.jks
+
+before_script:
+  - apt-get update && apt-get install -y openjdk-11-jdk unzip curl
+  # Directly download and extract the correct Flutter SDK version.
+  - FLUTTER_SDK_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.27.2-stable.tar.xz"
+  - curl -sL $FLUTTER_SDK_URL -o flutter_linux.tar.xz
+  - tar -xvf flutter_linux.tar.xz
+  - export PATH="$PATH:$PWD/flutter/bin"
+  - flutter --version
+  - flutter doctor
+  - flutter pub get
+
+build_release:
+  stage: build
+  image: ghcr.io/cirruslabs/flutter
+  script:
+    - echo "Building APK..."
+    # Decode the keystore file from Base64 and store it in the appropriate location
+    # echo "$KEYSTORE_BASE64" | base64 -d > android/app/my-release-key.jks
+    - echo "$ANDROID_KEY_PROPERTIES" > android/key.properties
+    # flutter build apk --release
+    - echo "Building AAB..."
+    - flutter build appbundle --release
+  artifacts:
+    paths:
+      - build/app/outputs/bundle/release/app-release.aab
+    expire_in: 1 week
+
+# Generate Fastfile for deployment to the Google Play Store
+deploy_to_play_store:
+  stage: deploy
+  image: ruby:3.2
+  dependencies:
+    - build_release
+  before_script:
+    - apt-get update && apt-get install -y ruby-dev libffi-dev
+    - gem install fastlane -v 2.215.0
+  script:
+    - mkdir -p fastlane
+    - |
+      # Generate Fastfile dynamically for deploying to Google Play Store
+      cat <<EOF > fastlane/Fastfile
+      default_platform(:android)
+
+      platform :android do
+        desc "Deploy to Google Play Store"
+        lane :deploy do
+          upload_to_play_store(
+            track: 'alpha',
+            json_key: "android/google-play-service-account.json",
+            aab: 'build/app/outputs/bundle/release/app-release.aab',
+            package_name: "com.lyra.nzk" # Replace with your actual package name
+          )
+        end
+      end
+      EOF
+    - fastlane deploy
+
+cleanup_sensitive_files:
+  stage: cleanup
+  script:
+    - echo "Cleaning up sensitive files..."
+    - rm -f android/app/my-release-key.jks
+    - rm -f android/app/google-services.json
+    - rm -f android/google-play-service-account.json
+  when: always
+  only:
+    - main
+

@@ -142,7 +142,7 @@ class _MainScreenState extends State<MainScreen> {
   void _onItemTapped(int index) {
     setState(() {
       if (index == 2) {
-        _checkForUpdate(); // Check for updates when navigating to Support
+        _checkForUpdate(); // Check for updates when navigating to Support menu.
       }
     });
   }
